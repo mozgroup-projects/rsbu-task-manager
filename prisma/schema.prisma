@@ -1,0 +1,192 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum TaskStatus {
+  todo
+  in_progress
+  done
+}
+
+enum TaskPriority {
+  low
+  medium
+  high
+  urgent
+}
+
+enum Recurrence {
+  none
+  daily
+  weekly
+  monthly
+}
+
+enum ActivityAction {
+  created
+  updated
+  status_changed
+  transferred
+  commented
+  attachment_added
+  reminder_sent
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  name               String
+  email              String    @unique
+  emailVerified      DateTime?
+  passwordHash       String?
+  image              String?
+  timezone           String    @default("Europe/Moscow")
+  telegramChatId     String?
+  telegramLinkCode   String?   @unique
+  googleRefreshToken String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  accounts        Account[]
+  sessions        Session[]
+  ownedTasks      Task[]         @relation("TaskOwner")
+  createdTasks    Task[]         @relation("TaskCreator")
+  comments        Comment[]
+  attachments     Attachment[]
+  activityLogs    ActivityLog[]
+  tags            Tag[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Task {
+  id              String       @id @default(cuid())
+  title           String
+  description     String?      @db.Text
+  status          TaskStatus   @default(todo)
+  priority        TaskPriority @default(medium)
+  dueAt           DateTime?
+  recurrence      Recurrence   @default(none)
+  remindersEnabled Boolean     @default(true)
+  completedAt     DateTime?
+  googleEventId   String?
+
+  ownerId     String
+  owner       User   @relation("TaskOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User   @relation("TaskCreator", fields: [createdById], references: [id])
+
+  tags        TaskTag[]
+  comments    Comment[]
+  attachments Attachment[]
+  activity    ActivityLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([dueAt])
+}
+
+model Tag {
+  id      String    @id @default(cuid())
+  name    String
+  color   String    @default("#2463EB")
+  ownerId String
+  owner   User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  tasks   TaskTag[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([ownerId, name])
+}
+
+model TaskTag {
+  taskId String
+  tagId  String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, tagId])
+}
+
+model Comment {
+  id       String   @id @default(cuid())
+  taskId   String
+  authorId String
+  body     String   @db.Text
+  task     Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author   User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  taskId       String
+  uploadedById String
+  fileName     String
+  storagePath  String
+  size         Int
+  mimeType     String
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+
+  @@index([taskId])
+}
+
+model ActivityLog {
+  id        String         @id @default(cuid())
+  taskId    String
+  actorId   String
+  action    ActivityAction
+  field     String?
+  oldValue  String?        @db.Text
+  newValue  String?        @db.Text
+  task      Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actor     User           @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  createdAt DateTime       @default(now())
+
+  @@index([taskId])
+}
