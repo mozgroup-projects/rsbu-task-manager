@@ -107,6 +107,7 @@ model Task {
   recurrence      Recurrence   @default(none)
   remindersEnabled Boolean     @default(true)
   completedAt     DateTime?
+  deletedAt       DateTime?
   googleEventId   String?
 
   ownerId     String
@@ -125,6 +126,7 @@ model Task {
   @@index([ownerId])
   @@index([status])
   @@index([dueAt])
+  @@index([deletedAt])
 }
 
 model Tag {

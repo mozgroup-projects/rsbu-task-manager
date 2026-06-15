@@ -16,7 +16,7 @@ const taskInclude = {
 export type TaskWithMeta = Prisma.TaskGetPayload<{ include: typeof taskInclude }>;
 
 export async function getUserTasks(userId: string, filters: TaskFilters = {}) {
-  const where: Prisma.TaskWhereInput = { ownerId: userId };
+  const where: Prisma.TaskWhereInput = { ownerId: userId, deletedAt: null };
   if (filters.status) where.status = filters.status;
   if (filters.priority) where.priority = filters.priority;
   if (filters.tagId) where.tags = { some: { tagId: filters.tagId } };
@@ -36,13 +36,14 @@ export async function getUserTasks(userId: string, filters: TaskFilters = {}) {
 
 export async function getTaskStats(userId: string) {
   const [todo, inProgress, done, overdue] = await Promise.all([
-    prisma.task.count({ where: { ownerId: userId, status: "todo" } }),
-    prisma.task.count({ where: { ownerId: userId, status: "in_progress" } }),
-    prisma.task.count({ where: { ownerId: userId, status: "done" } }),
+    prisma.task.count({ where: { ownerId: userId, status: "todo", deletedAt: null } }),
+    prisma.task.count({ where: { ownerId: userId, status: "in_progress", deletedAt: null } }),
+    prisma.task.count({ where: { ownerId: userId, status: "done", deletedAt: null } }),
     prisma.task.count({
       where: {
         ownerId: userId,
         status: { not: "done" },
+        deletedAt: null,
         dueAt: { lt: new Date() },
       },
     }),
@@ -71,8 +72,16 @@ export async function getTask(taskId: string, userId: string) {
       },
     },
   });
-  if (!task || task.ownerId !== userId) return null;
+  if (!task || task.ownerId !== userId || task.deletedAt) return null;
   return task;
+}
+
+export async function getDeletedTasks(userId: string) {
+  return prisma.task.findMany({
+    where: { ownerId: userId, deletedAt: { not: null } },
+    include: taskInclude,
+    orderBy: { deletedAt: "desc" },
+  });
 }
 
 export async function getUserTags(userId: string) {

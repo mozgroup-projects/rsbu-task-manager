@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { LayoutDashboard, Settings, LogOut } from "lucide-react";
+import { LayoutDashboard, Settings, LogOut, Trash2 } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +38,7 @@ export function AppHeader({
   const pathname = usePathname();
   const nav = [
     { href: "/dashboard", label: "Задачи", icon: LayoutDashboard },
+    { href: "/trash", label: "Удалённые", icon: Trash2 },
     { href: "/settings", label: "Настройки", icon: Settings },
   ];
 

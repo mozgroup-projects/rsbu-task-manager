@@ -10,6 +10,11 @@ import {
   deleteCalendarEvent,
   getUserRefreshToken,
 } from "@/lib/google-calendar";
+import {
+  getSupabaseAdmin,
+  isStorageConfigured,
+  STORAGE_BUCKET,
+} from "@/lib/supabase";
 
 type ActionResult = { ok: boolean; error?: string; id?: string };
 
@@ -81,7 +86,7 @@ export async function updateTask(
   if (!userId) return { ok: false, error: "Не авторизован" };
 
   const existing = await prisma.task.findUnique({ where: { id: taskId } });
-  if (!existing || existing.ownerId !== userId) {
+  if (!existing || existing.ownerId !== userId || existing.deletedAt) {
     return { ok: false, error: "Задача не найдена" };
   }
 
@@ -151,7 +156,7 @@ export async function setTaskStatus(
   if (!userId) return { ok: false, error: "Не авторизован" };
 
   const existing = await prisma.task.findUnique({ where: { id: taskId } });
-  if (!existing || existing.ownerId !== userId) {
+  if (!existing || existing.ownerId !== userId || existing.deletedAt) {
     return { ok: false, error: "Задача не найдена" };
   }
   if (existing.status === status) return { ok: true, id: taskId };
@@ -177,6 +182,7 @@ export async function setTaskStatus(
   return { ok: true, id: taskId };
 }
 
+/** Soft delete — moves the task to the trash (Удалённые). */
 export async function deleteTask(taskId: string): Promise<ActionResult> {
   const userId = await getUserId();
   if (!userId) return { ok: false, error: "Не авторизован" };
@@ -185,12 +191,78 @@ export async function deleteTask(taskId: string): Promise<ActionResult> {
   if (!existing || existing.ownerId !== userId) {
     return { ok: false, error: "Задача не найдена" };
   }
+  // Remove the calendar event while the task sits in the trash.
   if (existing.googleEventId) {
     const refresh = await getUserRefreshToken(userId);
     await deleteCalendarEvent(existing.googleEventId, refresh);
   }
-  await prisma.task.delete({ where: { id: taskId } });
+  await prisma.task.update({
+    where: { id: taskId },
+    data: { deletedAt: new Date(), googleEventId: null },
+  });
   revalidatePath("/dashboard");
+  revalidatePath("/trash");
+  return { ok: true };
+}
+
+/** Restore a soft-deleted task back to the active list. */
+export async function restoreTask(taskId: string): Promise<ActionResult> {
+  const userId = await getUserId();
+  if (!userId) return { ok: false, error: "Не авторизован" };
+
+  const existing = await prisma.task.findUnique({ where: { id: taskId } });
+  if (!existing || existing.ownerId !== userId || !existing.deletedAt) {
+    return { ok: false, error: "Задача не найдена" };
+  }
+  const restored = await prisma.task.update({
+    where: { id: taskId },
+    data: { deletedAt: null },
+  });
+  // Re-create the calendar event if the task has a deadline.
+  if (restored.dueAt) {
+    const refresh = await getUserRefreshToken(userId);
+    const eventId = await syncTaskToCalendar(restored, refresh);
+    if (eventId && eventId !== restored.googleEventId) {
+      await prisma.task.update({
+        where: { id: taskId },
+        data: { googleEventId: eventId },
+      });
+    }
+  }
+  revalidatePath("/dashboard");
+  revalidatePath("/trash");
+  return { ok: true, id: taskId };
+}
+
+/** Permanently remove a task (and its attachment files) from the trash. */
+export async function deleteTaskPermanently(
+  taskId: string,
+): Promise<ActionResult> {
+  const userId = await getUserId();
+  if (!userId) return { ok: false, error: "Не авторизован" };
+
+  const existing = await prisma.task.findUnique({
+    where: { id: taskId },
+    include: { attachments: true },
+  });
+  if (!existing || existing.ownerId !== userId) {
+    return { ok: false, error: "Задача не найдена" };
+  }
+
+  // Best-effort cleanup of attachment files in storage.
+  if (existing.attachments.length && isStorageConfigured()) {
+    try {
+      const supabase = getSupabaseAdmin();
+      await supabase.storage
+        .from(STORAGE_BUCKET)
+        .remove(existing.attachments.map((a) => a.storagePath));
+    } catch (err) {
+      console.error("Storage cleanup failed:", err);
+    }
+  }
+
+  await prisma.task.delete({ where: { id: taskId } });
+  revalidatePath("/trash");
   return { ok: true };
 }
 
@@ -202,7 +274,7 @@ export async function transferTask(
   if (!userId) return { ok: false, error: "Не авторизован" };
 
   const existing = await prisma.task.findUnique({ where: { id: taskId } });
-  if (!existing || existing.ownerId !== userId) {
+  if (!existing || existing.ownerId !== userId || existing.deletedAt) {
     return { ok: false, error: "Задача не найдена" };
   }
   if (newOwnerId === userId) {

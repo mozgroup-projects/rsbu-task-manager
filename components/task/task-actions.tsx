@@ -99,7 +99,8 @@ export function TaskActions({
           <DialogHeader>
             <DialogTitle>Удалить задачу?</DialogTitle>
             <DialogDescription>
-              Действие необратимо. Задача и её история будут удалены.
+              Задача переедет в раздел «Удалённые». Оттуда её можно восстановить
+              или удалить навсегда.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
